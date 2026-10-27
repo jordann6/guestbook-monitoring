@@ -5,8 +5,10 @@ example, extended with Prometheus and Grafana. One `pulumi up` deploys the
 Guestbook, kube-prometheus-stack, ServiceMonitors for the frontend and the Redis
 backend, and a Grafana dashboard with request rate, error rate, and pod
 CPU/memory. Stack outputs give the Grafana URL and admin credentials.
-`scripts/verify.sh` proves the whole thing end to end, and CI runs that same
-proof on a throwaway k3d cluster for every push.
+`scripts/verify.sh` checks the whole thing end to end. CI is configured to run
+the same proof on a throwaway k3d cluster for pushes to `main`, pull requests,
+and manual workflow runs. The local cold cycle has passed; the first GitHub
+Actions run is pending.
 
 ![Architecture: Pulumi, gated by a CrossGuard policy pack and a destroy guard, deploys to a k3d cluster. In the guestbook namespace, browser traffic enters each frontend pod through an Envoy sidecar that proxies to PHP/Apache, which writes to the Redis leader and reads from the replica. Each Redis pod runs a redis_exporter sidecar. In the monitoring namespace, ServiceMonitors point Prometheus at the Envoy and exporter metrics ports and at kubelet cAdvisor for pod CPU and memory, and Grafana, exposed on NodePort 30300 with a generated admin secret, reads from Prometheus.](docs/architecture.png)
 
@@ -17,16 +19,22 @@ the only monitoring component exposed outside the cluster.*
 
 ## Quick start
 
-Requirements: Docker, [k3d](https://k3d.io), kubectl, Node 20+, the
-[Pulumi CLI](https://www.pulumi.com/docs/iac/download-install/) (`brew install pulumi`), jq.
+Requirements: Git, Bash, a running Docker daemon, [k3d](https://k3d.io), kubectl,
+Node 22+ with npm (CI uses Node 22), the [Pulumi CLI](https://www.pulumi.com/docs/iac/download-install/)
+(`brew install pulumi`), curl, and jq.
 No Pulumi Cloud account is needed: state is kept in a local file backend
 inside the repo (`.pulumi-state/`, gitignored).
 
 ```bash
-scripts/deploy.sh    # creates k3d cluster "guestbook" if missing, then policy-gated preview, destroy-guard, pulumi up (about 2 minutes)
+git clone https://github.com/jordann6/guestbook-monitoring.git
+cd guestbook-monitoring
+scripts/deploy.sh    # creates k3d cluster "guestbook" if missing, then policy-gated preview, destroy-guard, pulumi up
 scripts/verify.sh    # end-to-end checks, see below
 scripts/destroy.sh   # pulumi destroy + delete the cluster
 ```
+
+Allow a few minutes for deployment and verification; the first image downloads
+can take longer. The default target is local k3d and needs no cloud account.
 
 `deploy.sh` encrypts the state with an empty passphrase by default so the demo
 runs with no setup. Export `PULUMI_CONFIG_PASSPHRASE` first to use your own.
@@ -34,7 +42,8 @@ runs with no setup. Export `PULUMI_CONFIG_PASSPHRASE` first to use your own.
 ### Grafana URL and credentials
 
 ```bash
-export PULUMI_BACKEND_URL="file://$(pwd)/.pulumi-state" PULUMI_CONFIG_PASSPHRASE=""
+export PULUMI_BACKEND_URL="file://$(pwd)/.pulumi-state"
+export PULUMI_CONFIG_PASSPHRASE="${PULUMI_CONFIG_PASSPHRASE-}"
 pulumi stack output grafanaUrl                       # http://localhost:30300
 pulumi stack output grafanaUser                      # admin
 pulumi stack output grafanaPassword --show-secrets   # generated, 24 chars
@@ -84,7 +93,7 @@ verify: all checks passed
 
 To check by hand:
 
-1. `kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090`, then open
+1. `kubectl --context k3d-guestbook -n monitoring port-forward svc/kps-prometheus 9090:9090`, then open
    <http://localhost:9090/targets> and filter on `guestbook`. You should see
    `serviceMonitor/guestbook/guestbook-frontend-*` (3 targets) and
    `serviceMonitor/guestbook/guestbook-redis-*` (2 targets), all UP.
@@ -107,10 +116,9 @@ To check by hand:
 
 ![Grafana "Guestbook Overview" dashboard: request rate, 5xx error rate, scrape targets up (5), Redis replica link UP, request rate by status class, error rate over time, pod CPU, pod memory, Redis commands per second, and frontend p95 latency](docs/grafana-dashboard.png)
 
-*Guestbook Overview under a steady load of about 9 req/s, with roughly 1 request
-in 30 forced to 503 through the fault header above (hence the ~1.3% error
-rate). Provisioned from `dashboards/guestbook.json` through the Grafana
-dashboard sidecar.*
+*Guestbook Overview under a steady load of about 9 req/s, with forced 503s
+through the fault header above. Provisioned from `dashboards/guestbook.json`
+through the Grafana dashboard sidecar.*
 
 Panels: request rate, 5xx error rate, healthy scrape targets, Redis replica
 link status, requests by status class, error rate over time, pod CPU,
@@ -154,14 +162,15 @@ Full reasoning in [docs/adr/](docs/adr/).
 
 ## What broke along the way
 
-- **The upstream example's Redis replication is broken today.** It runs an
+- **The upstream example's Redis replication failed during testing.** It ran an
   unpinned `redis` leader against `pulumi/guestbook-redis-replica`, which is
-  built on Redis 6.0.5. `redis:latest` is now 8.x, and the replica fails every
-  sync with `Can't handle RDB format version 15`. Writes go to the leader and
-  succeed, but reads go to the replica, which has no data, so the guestbook
-  shows an empty list. The leader still reports `connected_slaves:1` while every
-  sync fails, so a check on the leader would have passed. The dashboard and
-  `verify.sh` read `master_link_status` from the replica instead, and verify
+  built on Redis 6.0.5. At the time of testing, `redis:latest` resolved to 8.x,
+  and the replica failed every sync with `Can't handle RDB format version 15`.
+  Writes to the leader succeeded, but reads went to the replica, which had no
+  data, so the guestbook showed an empty list. The leader still reported
+  `connected_slaves:1` while every sync failed, so a check on the leader would
+  have passed. The dashboard and `verify.sh` read `master_link_status` from
+  the replica instead, and verify
   reads the test message back from the replica itself. Fixed by running both
   tiers on the same pinned `redis:7.4.6` (the replica is
   `--replicaof redis-leader 6379`, which is all the old image's run.sh did).
@@ -187,7 +196,9 @@ Full reasoning in [docs/adr/](docs/adr/).
   `rate()` had nothing to compare against and read zero, even though the
   counters were correct. The script now waits up to 3 minutes for 5/5 targets,
   then spreads traffic over about 40 seconds before querying. The final version
-  passed a full destroy, deploy, verify cycle, and CI runs that cycle on every push.
+  passed a full local destroy, deploy, verify cycle. CI is configured to repeat
+  that cycle on pushes to `main`, pull requests, and manual workflow runs;
+  its first GitHub Actions run is pending.
 
 ## Guardrails
 
@@ -196,9 +207,10 @@ repos (Terraform + OPA there), rebuilt self-contained for Pulumi and TypeScript.
 
 | Gate | Blocks on | Where |
 | --- | --- | --- |
-| gitleaks | Any committed secret, full history | CI + pre-commit |
-| `tsc --noEmit`, eslint, shellcheck | Type errors, lint, script bugs | CI + pre-commit |
-| Trivy | CRITICAL/HIGH vulnerable npm dependencies, secrets | CI |
+| gitleaks | Secrets in full Git history (CI) or staged changes (pre-commit) | CI + pre-commit |
+| `tsc --noEmit`, shellcheck | Type errors, script bugs | CI + pre-commit |
+| eslint | TypeScript lint errors | CI |
+| Trivy | Fixable CRITICAL/HIGH npm dependency vulnerabilities, secrets | CI |
 | CrossGuard policy pack ([policy/](policy/rules.ts)) | Rules below | `scripts/deploy.sh`, `pulumi preview/up --policy-pack ./policy`, CI |
 | [destroy-guard](scripts/destroy-guard.sh) | A preview that deletes or replaces a namespace, the Helm release, the Redis leader, or the Grafana admin Secret | `scripts/deploy.sh` and CI, unless `DESTROY_APPROVED=true` (CI sets it from the `destroy-approved` PR label) |
 | k3d end-to-end | Deploy, `verify.sh`, destroy on a fresh cluster | CI |

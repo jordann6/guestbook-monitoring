@@ -6,8 +6,8 @@
 #   e2e       ephemeral k3d cluster: policy-gated preview, destroy-guard, pulumi up,
 #             scripts/verify.sh, pulumi destroy. No cloud credentials involved.
 #
-# Every third-party action is pinned to a commit SHA; tool binaries are pinned
-# by version and checked against their published checksums.
+# Every third-party action is pinned to a commit SHA. Pulumi and k3d binaries
+# are pinned by version and checked against their published checksums.
 
 name: ci
 
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
