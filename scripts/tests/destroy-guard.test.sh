@@ -13,4 +13,5 @@ expect 0 "safe preview passes (ConfigMap replace is not protected)" "$GUARD" "$D
 expect 1 "redis-leader replace + namespace delete is blocked"       "$GUARD" "$DIR/fixtures/destructive.json"
 expect 0 "DESTROY_APPROVED=true lets it through" env DESTROY_APPROVED=true "$GUARD" "$DIR/fixtures/destructive.json"
 expect 2 "missing file is a usage error"                            "$GUARD" "$DIR/fixtures/nope.json"
+expect 2 "preview without steps fails closed"                       "$GUARD" "$DIR/fixtures/invalid.json"
 exit "$FAILED"

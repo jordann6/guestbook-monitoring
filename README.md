@@ -23,7 +23,7 @@ No Pulumi Cloud account is needed: state is kept in a local file backend
 inside the repo (`.pulumi-state/`, gitignored).
 
 ```bash
-scripts/deploy.sh    # creates k3d cluster "guestbook" if missing, then pulumi up (about 2 minutes)
+scripts/deploy.sh    # creates k3d cluster "guestbook" if missing, then policy-gated preview, destroy-guard, pulumi up (about 2 minutes)
 scripts/verify.sh    # end-to-end checks, see below
 scripts/destroy.sh   # pulumi destroy + delete the cluster
 ```
@@ -199,8 +199,8 @@ repos (Terraform + OPA there), rebuilt self-contained for Pulumi and TypeScript.
 | gitleaks | Any committed secret, full history | CI + pre-commit |
 | `tsc --noEmit`, eslint, shellcheck | Type errors, lint, script bugs | CI + pre-commit |
 | Trivy | CRITICAL/HIGH vulnerable npm dependencies, secrets | CI |
-| CrossGuard policy pack ([policy/](policy/rules.ts)) | Rules below | `pulumi preview/up --policy-pack ./policy`, CI |
-| [destroy-guard](scripts/destroy-guard.sh) | A preview that deletes or replaces a namespace, the Helm release, the Redis leader, or the Grafana admin Secret | CI, unless the PR has the `destroy-approved` label |
+| CrossGuard policy pack ([policy/](policy/rules.ts)) | Rules below | `scripts/deploy.sh`, `pulumi preview/up --policy-pack ./policy`, CI |
+| [destroy-guard](scripts/destroy-guard.sh) | A preview that deletes or replaces a namespace, the Helm release, the Redis leader, or the Grafana admin Secret | `scripts/deploy.sh` and CI, unless `DESTROY_APPROVED=true` (CI sets it from the `destroy-approved` PR label) |
 | k3d end-to-end | Deploy, `verify.sh`, destroy on a fresh cluster | CI |
 
 Policy rules (mandatory unless noted): CPU and memory limits on every container;

@@ -23,6 +23,11 @@ if [[ -z "$PREVIEW_JSON" || ! -f "$PREVIEW_JSON" ]]; then
   exit 2
 fi
 command -v jq >/dev/null 2>&1 || { echo "destroy-guard: jq is required" >&2; exit 2; }
+# Fail closed: an empty or truncated preview would otherwise match nothing and pass.
+jq -e '.steps | type == "array"' "$PREVIEW_JSON" >/dev/null 2>&1 || {
+  echo "destroy-guard: $PREVIEW_JSON is not a Pulumi preview (no .steps array)" >&2
+  exit 2
+}
 
 # Matched against "<type>::<name>" from each step's URN.
 #   Namespace        deleting it deletes everything inside it
