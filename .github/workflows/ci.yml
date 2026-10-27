@@ -1,0 +1,141 @@
+# CI for guestbook-monitoring. Self-contained port of the platform-guardrails
+# gates to a Pulumi/TypeScript repo:
+#
+#   secrets   gitleaks over full history
+#   static    tsc, eslint, shellcheck, Trivy (deps + secrets), policy-pack and destroy-guard tests
+#   e2e       ephemeral k3d cluster: policy-gated preview, destroy-guard, pulumi up,
+#             scripts/verify.sh, pulumi destroy. No cloud credentials involved.
+#
+# Every third-party action is pinned to a commit SHA; tool binaries are pinned
+# by version and checked against their published checksums.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PULUMI_VERSION: 3.272.0
+  PULUMI_SHA256: 58d545f2b98761051922008ebd381ecef95484d7f7a5ff7faa15d7a780ea84f6
+  K3D_VERSION: v5.8.3
+  K3D_SHA256: dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e
+  GITLEAKS_VERSION: 8.24.3
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+      - name: Scan full history
+        run: gitleaks detect --source . --redact --no-banner --exit-code 1
+
+  static:
+    name: Typecheck, lint, policy tests, scans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            policy/package-lock.json
+      - name: Program
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm run build
+          npm run lint
+      - name: Policy pack unit tests
+        working-directory: policy
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          npm test
+      - name: destroy-guard fixture tests
+        run: scripts/tests/destroy-guard.test.sh
+      - name: shellcheck
+        run: shellcheck -x scripts/*.sh scripts/tests/*.sh
+      - name: Trivy (dependencies, secrets)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  e2e:
+    name: Deploy and verify on k3d
+    runs-on: ubuntu-latest
+    needs: [secrets, static]
+    timeout-minutes: 30
+    env:
+      PULUMI_BACKEND_URL: file://${{ github.workspace }}/.pulumi-state
+      PULUMI_CONFIG_PASSPHRASE: ci-ephemeral
+      PULUMI_SKIP_UPDATE_CHECK: "true"
+      DESTROY_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'destroy-approved') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            policy/package-lock.json
+      - name: Install Pulumi and k3d (checksum-verified)
+        run: |
+          curl -fsSLo pulumi.tgz "https://github.com/pulumi/pulumi/releases/download/v${PULUMI_VERSION}/pulumi-v${PULUMI_VERSION}-linux-x64.tar.gz"
+          echo "${PULUMI_SHA256}  pulumi.tgz" | sha256sum -c -
+          sudo tar -xzf pulumi.tgz -C /usr/local/bin --strip-components=1 && rm pulumi.tgz
+          curl -fsSLo k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  k3d" | sha256sum -c -
+          sudo install -m 0755 k3d /usr/local/bin/k3d && rm k3d
+          pulumi version && k3d version
+      - name: Build policy pack
+        working-directory: policy
+        run: npm ci --no-audit --no-fund --ignore-scripts && npm run build
+      - name: Create cluster
+        run: |
+          k3d cluster create guestbook --agents 1 -p "30080:30080@server:0" -p "30300:30300@server:0" --wait
+      - name: Stack
+        run: |
+          npm ci --no-audit --no-fund --ignore-scripts
+          mkdir -p .pulumi-state
+          pulumi stack init dev
+          pulumi config set kubernetes:context k3d-guestbook
+      - name: Policy-gated preview + destroy-guard
+        run: |
+          pulumi preview --policy-pack ./policy
+          pulumi preview --json > preview.json
+          scripts/destroy-guard.sh preview.json
+      - name: pulumi up (policy-gated)
+        run: pulumi up --yes --skip-preview --policy-pack ./policy
+      - name: Verify Guestbook metrics are scraped
+        run: scripts/verify.sh
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n guestbook describe pods || true
+          kubectl -n monitoring get servicemonitors,svc -A || true
+      - name: pulumi destroy
+        if: always()
+        run: pulumi destroy --yes --skip-preview || true

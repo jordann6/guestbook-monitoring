@@ -1,0 +1,5 @@
+{"steps":[
+ {"op":"same","urn":"urn:pulumi:dev::guestbook-monitoring::pulumi:pulumi:Stack::guestbook-monitoring-dev"},
+ {"op":"update","urn":"urn:pulumi:dev::guestbook-monitoring::guestbook:app:Guestbook$kubernetes:apps/v1:Deployment::frontend"},
+ {"op":"replace","urn":"urn:pulumi:dev::guestbook-monitoring::guestbook:app:Guestbook$kubernetes:core/v1:ConfigMap::frontend-envoy"}
+]}

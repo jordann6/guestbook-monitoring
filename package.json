@@ -1,0 +1,24 @@
+{
+  "name": "guestbook-monitoring",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pulumi kubernetes-ts-guestbook extended with Prometheus and Grafana",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/node": "20.19.43",
+    "eslint": "9.39.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  },
+  "dependencies": {
+    "@pulumi/kubernetes": "4.34.2",
+    "@pulumi/pulumi": "3.272.0",
+    "@pulumi/random": "4.21.4"
+  },
+  "license": "MIT"
+}

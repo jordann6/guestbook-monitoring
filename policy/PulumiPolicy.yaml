@@ -1,0 +1,5 @@
+runtime:
+  name: nodejs
+  options:
+    typescript: false
+description: Guestbook guardrails, ported from the platform-guardrails OPA rules

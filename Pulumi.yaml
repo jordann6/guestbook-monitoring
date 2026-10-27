@@ -1,0 +1,12 @@
+name: guestbook-monitoring
+runtime: nodejs
+description: Kubernetes Guestbook (from pulumi/examples kubernetes-ts-guestbook) with Prometheus and Grafana
+config:
+  useLoadBalancer:
+    type: boolean
+    default: false
+    description: Expose the frontend and Grafana as LoadBalancer instead of NodePort (set true on AKS/EKS/GKE)
+  nodeHost:
+    type: string
+    default: localhost
+    description: Host used to build NodePort URLs in the stack outputs (k3d maps node ports to localhost)

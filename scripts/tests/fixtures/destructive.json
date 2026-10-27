@@ -1,0 +1,5 @@
+{"steps":[
+ {"op":"update","urn":"urn:pulumi:dev::guestbook-monitoring::guestbook:app:Guestbook$kubernetes:apps/v1:Deployment::frontend"},
+ {"op":"replace","urn":"urn:pulumi:dev::guestbook-monitoring::guestbook:app:Guestbook$kubernetes:apps/v1:Deployment::redis-leader"},
+ {"op":"delete","urn":"urn:pulumi:dev::guestbook-monitoring::kubernetes:core/v1:Namespace::monitoring"}
+]}

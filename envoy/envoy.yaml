@@ -1,0 +1,95 @@
+# Envoy sidecar for the Guestbook frontend.
+#
+# The upstream PHP/Apache image exposes no metrics, so every request goes
+# through Envoy first. Envoy counts requests by response code class, which is
+# what the request-rate and error-rate panels are built on.
+#
+#   :8080  ingress_http  -> PHP/Apache on 127.0.0.1:80 (what the Service targets)
+#   :9901  metrics       -> /stats/prometheus only, proxied to the admin API
+#   :9902  admin API     -> bound to 127.0.0.1, never reachable from outside the pod
+#
+# The admin API also serves /quitquitquit and /runtime_modify, so it is not
+# exposed directly. The metrics listener allows exactly one path.
+
+admin:
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9902 }
+
+static_resources:
+  listeners:
+    - name: ingress
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                route_config:
+                  virtual_hosts:
+                    - name: guestbook
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: guestbook_php }
+                http_filters:
+                  # Demo affordance: a request carrying x-envoy-fault-abort-request: 503
+                  # gets a 503 from Envoy, so the error-rate panel can be shown
+                  # moving without breaking Redis. Requests without the header are
+                  # untouched. Remove this filter outside a demo.
+                  - name: envoy.filters.http.fault
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.fault.v3.HTTPFault
+                      abort:
+                        header_abort: {}
+                        percentage: { numerator: 100, denominator: HUNDRED }
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+    - name: metrics
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: metrics
+                route_config:
+                  virtual_hosts:
+                    - name: metrics
+                      domains: ["*"]
+                      routes:
+                        - match: { path: "/stats/prometheus" }
+                          route: { cluster: envoy_admin }
+                        - match: { prefix: "/" }
+                          direct_response: { status: 404 }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: guestbook_php
+      type: STATIC
+      connect_timeout: 1s
+      load_assignment:
+        cluster_name: guestbook_php
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 80 }
+
+    - name: envoy_admin
+      type: STATIC
+      connect_timeout: 1s
+      load_assignment:
+        cluster_name: envoy_admin
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 9902 }

@@ -1,0 +1,6 @@
+# Follow `source lib.sh` from each script.
+external-sources=true
+source-path=SCRIPTDIR
+# SC2015: `check && pass || fail` is intended; pass() always returns 0.
+# SC2001: sed for indenting multi-line output is clearer than parameter expansion.
+disable=SC2001,SC2015

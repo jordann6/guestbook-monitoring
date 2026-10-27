@@ -1,0 +1,21 @@
+node_modules/
+bin/
+.pulumi-state/
+policy/node_modules/
+policy/bin/
+*.log
+.DS_Store
+.env
+
+# Per-stack config holds the passphrase salt for the local backend; each
+# environment creates its own (scripts/deploy.sh, CI).
+Pulumi.*.yaml
+
+# Previews contain resolved values.
+preview.json
+
+# Kubeconfigs and credentials
+.envrc
+kubeconfig
+*.kubeconfig
+*.pem
