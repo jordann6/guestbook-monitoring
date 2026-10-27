@@ -5,10 +5,9 @@ example, extended with Prometheus and Grafana. One `pulumi up` deploys the
 Guestbook, kube-prometheus-stack, ServiceMonitors for the frontend and the Redis
 backend, and a Grafana dashboard with request rate, error rate, and pod
 CPU/memory. Stack outputs give the Grafana URL and admin credentials.
-`scripts/verify.sh` checks the whole thing end to end. CI is configured to run
-the same proof on a throwaway k3d cluster for pushes to `main`, pull requests,
-and manual workflow runs. The local cold cycle has passed; the first GitHub
-Actions run is pending.
+`scripts/verify.sh` checks the whole thing end to end, and CI runs the same
+proof on a throwaway k3d cluster for pushes to `main`, pull requests, and manual
+workflow runs.
 
 ![Architecture: Pulumi, gated by a CrossGuard policy pack and a destroy guard, deploys to a k3d cluster. In the guestbook namespace, browser traffic enters each frontend pod through an Envoy sidecar that proxies to PHP/Apache, which writes to the Redis leader and reads from the replica. Each Redis pod runs a redis_exporter sidecar. In the monitoring namespace, ServiceMonitors point Prometheus at the Envoy and exporter metrics ports and at kubelet cAdvisor for pod CPU and memory, and Grafana, exposed on NodePort 30300 with a generated admin secret, reads from Prometheus.](docs/architecture.png)
 
@@ -196,9 +195,8 @@ Full reasoning in [docs/adr/](docs/adr/).
   `rate()` had nothing to compare against and read zero, even though the
   counters were correct. The script now waits up to 3 minutes for 5/5 targets,
   then spreads traffic over about 40 seconds before querying. The final version
-  passed a full local destroy, deploy, verify cycle. CI is configured to repeat
-  that cycle on pushes to `main`, pull requests, and manual workflow runs;
-  its first GitHub Actions run is pending.
+  passed a full local destroy, deploy, verify cycle, and CI repeats that cycle
+  on a fresh k3d cluster on GitHub Actions.
 
 ## Guardrails
 
